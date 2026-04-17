@@ -1,10 +1,10 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import SiteReport from './RESEARCHGAP' // Import the new component
+import RESEARCHGAP from './RESEARCHGAP'
 import './style.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <SiteReport /> {/* Render the Site Report Builder */}
+    <RESEARCHGAP />
   </React.StrictMode>,
 )
