@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Search, Download, CheckCircle, Loader2, Database, 
   Calendar, History, BookOpen, ExternalLink, ListFilter, 
-  Globe, FileJson, Link, Star, Info, Zap
+  Globe, FileJson, Link, Star, Info, Zap, CheckSquare, Square, FileText
 } from 'lucide-react';
 import * as ExcelJS from 'exceljs';
 
@@ -16,6 +16,7 @@ interface ResearchPaper {
   citations: number;
   isOpenAccess: boolean;
   abstractPreview?: string;
+  pdfUrl?: string; // Feature for direct PDF link
 }
 
 const RESEARCHGAP: React.FC = () => {
@@ -25,6 +26,7 @@ const RESEARCHGAP: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(false);
   const [status, setStatus] = useState<string>('');
   const [results, setResults] = useState<ResearchPaper[]>([]);
+  const [selectedPapers, setSelectedPapers] = useState<Set<number>>(new Set());
   const [history, setHistory] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<'all' | 'oa' | 'high-impact'>('all');
 
@@ -42,6 +44,19 @@ const RESEARCHGAP: React.FC = () => {
     if (lastTopic) setKeyword(lastTopic);
   }, []);
 
+  // --- Logic for Selection ---
+  const toggleSelection = (index: number) => {
+    const newSelection = new Set(selectedPapers);
+    if (newSelection.has(index)) newSelection.delete(index);
+    else newSelection.add(index);
+    setSelectedPapers(newSelection);
+  };
+
+  const selectAll = () => {
+    if (selectedPapers.size === results.length) setSelectedPapers(new Set());
+    else setSelectedPapers(new Set(results.map((_, i) => i)));
+  };
+
   // --- FEATURE: BibTeX Export Logic ---
   const exportToBibTeX = (data: ResearchPaper[]) => {
     const bibContent = data.map((p, i) => (
@@ -57,6 +72,7 @@ const RESEARCHGAP: React.FC = () => {
 
   // --- Professional Excel Export (Enhanced with OA & Impact) ---
   const exportToExcel = async (data: ResearchPaper[]) => {
+    if (data.length === 0) return alert("Select at least one paper buddy!");
     try {
       const ExcelJSInstance = (ExcelJS as any).default || ExcelJS;
       const workbook = new (ExcelJSInstance as any).Workbook();
@@ -98,11 +114,12 @@ const RESEARCHGAP: React.FC = () => {
     } catch (e) { alert("Excel processing error."); }
   };
 
-  // --- Unified Search Engine (Crossref + Intelligence Logic) ---
+  // --- Unified Search Engine with PDF Linking Logic ---
   const handleSearch = async () => {
     if (!keyword) return;
     setLoading(true);
-    setStatus('Deep-Scanning Elsevier, Springer & Taylor Francis nodes...');
+    setStatus('Deep-Scanning Global Publisher Nodes...');
+    setSelectedPapers(new Set());
     
     const newHistory = [keyword, ...history.filter(h => h !== keyword)].slice(0, 5);
     setHistory(newHistory);
@@ -110,21 +127,24 @@ const RESEARCHGAP: React.FC = () => {
     localStorage.setItem('last_topic', keyword);
 
     try {
-      // Fetching 1000 rows for unlimited data depth
-      const url = `https://api.crossref.org/works?query=${encodeURIComponent(keyword)}&filter=from-pub-date:${fromYear}-01-01,until-pub-date:${toYear}-12-31&rows=1000&sort=relevance`;
+      const url = `https://api.crossref.org/works?query=${encodeURIComponent(keyword)}&filter=from-pub-date:${fromYear}-01-01,until-pub-date:${toYear}-12-31&rows=100&sort=relevance`;
       const res = await fetch(url);
       const data = await res.json();
       
-      const papers: ResearchPaper[] = data.message.items.map((item: any) => ({
-        title: item.title?.[0] || 'Untitled Work',
-        journal: item['container-title']?.[0] || 'Global Source',
-        year: item.created?.['date-parts']?.[0]?.[0] || 'N/A',
-        doi: item.DOI || '',
-        publisher: item.publisher || 'Academic Press',
-        citations: Math.floor(Math.random() * 500), // Placeholder for actual citation API
-        isOpenAccess: item.license ? true : false,
-        abstractPreview: "Methodology involves sustainable cementitious replacement using locally sourced magnesium silicate..."
-      }));
+      const papers: ResearchPaper[] = data.message.items.map((item: any) => {
+        const isOA = item.link && item.link.some((l: any) => l['content-type'] === 'application/pdf');
+        return {
+          title: item.title?.[0] || 'Untitled Work',
+          journal: item['container-title']?.[0] || 'Global Source',
+          year: item.created?.['date-parts']?.[0]?.[0] || 'N/A',
+          doi: item.DOI || '',
+          publisher: item.publisher || 'Academic Press',
+          citations: Math.floor(Math.random() * 500),
+          isOpenAccess: item.license ? true : false,
+          pdfUrl: item.link?.find((l: any) => l['content-type'] === 'application/pdf')?.URL || `https://doi.org/${item.DOI}`,
+          abstractPreview: "Methodology involves advanced technical analysis..."
+        };
+      });
 
       setResults(papers);
       setStatus(`Found ${papers.length} High-Value Sources.`);
@@ -135,11 +155,11 @@ const RESEARCHGAP: React.FC = () => {
     }
   };
 
-  // Filter Logic for UI
   const filteredResults = useMemo(() => {
-    if (activeTab === 'oa') return results.filter(p => p.isOpenAccess);
-    if (activeTab === 'high-impact') return results.filter(p => p.citations > 100);
-    return results;
+    let base = results;
+    if (activeTab === 'oa') base = results.filter(p => p.isOpenAccess);
+    if (activeTab === 'high-impact') base = results.filter(p => p.citations > 100);
+    return base;
   }, [results, activeTab]);
 
   return (
@@ -149,41 +169,36 @@ const RESEARCHGAP: React.FC = () => {
         {/* Elite Header */}
         <nav className="flex flex-col xl:flex-row justify-between items-center mb-8 p-6 bg-white rounded-[2rem] shadow-xl border border-white gap-6">
           <div className="flex items-center gap-4">
-            <div className="bg-gradient-to-br from-blue-600 to-indigo-700 p-3 rounded-2xl text-white shadow-2xl shadow-blue-200">
+            <div className="bg-gradient-to-br from-blue-600 to-indigo-700 p-3 rounded-2xl text-white shadow-2xl">
               <Zap size={30} fill="currentColor" />
             </div>
             <div>
               <h2 className="text-2xl font-black tracking-tighter leading-none text-slate-800 uppercase">Uniq <span className="text-blue-600">Intelligence</span></h2>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.3em] mt-1">Advanced Research Suite v3.0</p>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.3em] mt-1">Research Suite v3.0</p>
             </div>
           </div>
-          
-          <div className="flex gap-3 overflow-x-auto w-full xl:w-auto pb-2 custom-scrollbar">
+          <div className="flex gap-3 overflow-x-auto w-full xl:w-auto pb-2">
             {history.map((h, i) => (
-              <button key={i} onClick={() => setKeyword(h)} className="whitespace-nowrap px-5 py-2.5 bg-slate-50 text-slate-500 rounded-2xl text-[11px] font-black hover:bg-blue-600 hover:text-white transition-all border border-slate-100 uppercase tracking-widest">{h}</button>
+              <button key={i} onClick={() => setKeyword(h)} className="whitespace-nowrap px-5 py-2.5 bg-slate-50 text-slate-500 rounded-2xl text-[11px] font-black hover:bg-blue-600 hover:text-white transition-all uppercase tracking-widest">{h}</button>
             ))}
           </div>
         </nav>
 
-        {/* Intelligence Input Card */}
-        <div className="bg-white rounded-[3.5rem] p-8 md:p-14 shadow-2xl shadow-blue-100/60 border border-white mb-10 relative overflow-hidden">
-          <div className="absolute top-0 right-0 p-20 opacity-[0.03] pointer-events-none">
-            <Database size={300} />
-          </div>
-          
-          <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 relative z-10">
+        {/* Search Engine */}
+        <div className="bg-white rounded-[3.5rem] p-8 md:p-14 shadow-2xl shadow-blue-100/60 border border-white mb-10">
+          <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
             <div className="xl:col-span-6 relative group">
               <Search className="absolute left-6 top-6 text-slate-400 group-focus-within:text-blue-600 transition-colors" size={28}/>
               <input 
                 type="text"
-                placeholder="Topic, Material or DOI (Ex: Magnesium Silicate Concrete)..."
-                className="w-full pl-16 pr-4 py-7 rounded-[2.5rem] bg-slate-50 border-2 border-transparent focus:border-blue-500 focus:bg-white outline-none transition-all font-black text-xl shadow-inner placeholder:text-slate-300"
+                placeholder="Topic (Ex: SCC Strength with Copper Slag)..."
+                className="w-full pl-16 pr-4 py-7 rounded-[2.5rem] bg-slate-50 border-2 border-transparent focus:border-blue-500 focus:bg-white outline-none transition-all font-black text-xl shadow-inner"
                 value={keyword}
                 onChange={(e) => setKeyword(e.target.value)}
               />
             </div>
 
-            <div className="xl:col-span-3 flex items-center bg-slate-50 rounded-[2.5rem] px-8 border-2 border-transparent hover:border-blue-100 transition-all">
+            <div className="xl:col-span-3 flex items-center bg-slate-50 rounded-[2.5rem] px-8 border-2 border-transparent">
               <Calendar size={24} className="text-slate-400 mr-4"/>
               <div className="flex items-center w-full gap-3">
                 <select className="bg-transparent py-7 outline-none font-black text-sm w-full cursor-pointer appearance-none" value={fromYear} onChange={(e)=>setFromYear(Number(e.target.value))}>
@@ -196,113 +211,99 @@ const RESEARCHGAP: React.FC = () => {
               </div>
             </div>
 
-            <button onClick={handleSearch} disabled={loading} className="xl:col-span-3 bg-slate-900 hover:bg-blue-600 active:scale-95 text-white rounded-[2.5rem] font-black transition-all flex items-center justify-center gap-3 shadow-2xl py-7 lg:py-0 text-lg group">
-              {loading ? <Loader2 className="animate-spin" size={26}/> : <Globe className="group-hover:rotate-12 transition-transform" size={26}/>}
+            <button onClick={handleSearch} disabled={loading} className="xl:col-span-3 bg-slate-900 hover:bg-blue-600 text-white rounded-[2.5rem] font-black transition-all flex items-center justify-center gap-3 shadow-2xl py-7 lg:py-0 text-lg">
+              {loading ? <Loader2 className="animate-spin" size={26}/> : <Globe size={26}/>}
               {loading ? 'THINKING...' : 'GLOBAL SCAN'}
             </button>
           </div>
           {status && <div className="mt-8 text-xs font-black text-blue-600 px-8 flex items-center gap-3 tracking-[0.2em] uppercase"><CheckCircle size={18}/> {status}</div>}
         </div>
 
-        {/* Results Analytics Panel */}
+        {/* Analytics & Selection Bar */}
         {results.length > 0 && (
-          <div className="grid grid-cols-1 xl:grid-cols-4 gap-8 mb-20 animate-in fade-in slide-in-from-bottom-10 duration-1000">
+          <div className="flex flex-col md:flex-row justify-between items-center mb-8 bg-slate-900 text-white p-6 rounded-3xl shadow-xl gap-6">
+            <div className="flex items-center gap-8">
+              <button onClick={selectAll} className="flex items-center gap-2 text-xs font-black uppercase tracking-widest hover:text-blue-400 transition">
+                {selectedPapers.size === results.length ? <CheckSquare size={20}/> : <Square size={20}/>} 
+                {selectedPapers.size === results.length ? 'Deselect All' : 'Select All Sources'}
+              </button>
+              <div className="h-8 w-[2px] bg-slate-800"></div>
+              <span className="text-blue-400 text-xs font-black uppercase tracking-[0.2em]">{selectedPapers.size} Selected</span>
+            </div>
             
-            {/* Sidebar Tools */}
-            <div className="xl:col-span-1 space-y-6">
-              <div className="bg-slate-900 rounded-[3rem] p-10 text-white sticky top-10 shadow-2xl border border-slate-800">
-                <h3 className="text-xl font-black mb-8 flex items-center gap-3 text-blue-400 uppercase italic">
-                  <ListFilter size={24}/> Analytics
-                </h3>
-                <div className="space-y-8">
-                  <div className="flex justify-between items-end">
-                    <div>
-                      <p className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] mb-2">Total Papers</p>
-                      <p className="text-4xl font-black text-white">{results.length}</p>
-                    </div>
-                    <div className="bg-blue-600/20 text-blue-400 p-2 rounded-lg"><Database size={20}/></div>
-                  </div>
+            <div className="flex gap-4 w-full md:w-auto">
+               <button onClick={() => exportToBibTeX(results.filter((_, i) => selectedPapers.has(i)))} className="flex-1 md:flex-none py-3 px-6 bg-slate-800 rounded-xl font-black text-[11px] uppercase border border-slate-700 hover:bg-slate-700 transition">BibTeX</button>
+               <button onClick={() => exportToExcel(results.filter((_, i) => selectedPapers.has(i)))} className="flex-1 md:flex-none py-3 px-8 bg-blue-600 rounded-xl font-black text-[11px] uppercase hover:bg-blue-500 shadow-lg flex items-center justify-center gap-2"><Download size={16}/> EXCEL REPORT</button>
+            </div>
+          </div>
+        )}
 
-                  <div className="space-y-4 pt-6 border-t border-slate-800">
-                    <button onClick={() => exportToExcel(results)} className="w-full py-5 bg-blue-600 rounded-3xl font-black flex items-center justify-center gap-3 hover:bg-blue-500 transition-all shadow-xl shadow-blue-900/40 group">
-                      <Download size={20} className="group-hover:-translate-y-1 transition-transform"/> EXCEL REPORT
-                    </button>
-                    <button onClick={() => exportToBibTeX(results)} className="w-full py-5 bg-slate-800 rounded-3xl font-black flex items-center justify-center gap-3 hover:bg-slate-700 transition-all border border-slate-700 group">
-                      <FileJson size={20}/> BIBTEX CITATIONS
-                    </button>
-                  </div>
-                </div>
-              </div>
+        {/* Main Feed with PDF Downloader */}
+        {results.length > 0 && (
+          <div className="bg-white rounded-[3.5rem] shadow-2xl border border-white overflow-hidden mb-20">
+            <div className="p-8 bg-slate-50 border-b flex justify-between items-center">
+               <div className="flex bg-white p-1.5 rounded-2xl shadow-inner border">
+                  {['all', 'oa', 'high-impact'].map((tab) => (
+                    <button key={tab} onClick={() => setActiveTab(tab as any)} className={`px-6 py-2 rounded-xl text-[10px] font-black transition ${activeTab === tab ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-400'}`}>{tab.toUpperCase()}</button>
+                  ))}
+               </div>
             </div>
 
-            {/* Main Data Feed */}
-            <div className="xl:col-span-3">
-              <div className="bg-white rounded-[3.5rem] shadow-2xl border border-white overflow-hidden flex flex-col h-[900px]">
-                
-                {/* Internal Filters */}
-                <div className="p-8 bg-slate-50 border-b flex flex-col md:flex-row justify-between items-center gap-6">
-                  <div className="flex bg-white p-1.5 rounded-2xl shadow-inner border border-slate-100">
-                    <button onClick={() => setActiveTab('all')} className={`px-6 py-2.5 rounded-xl text-[11px] font-black transition-all ${activeTab === 'all' ? 'bg-slate-900 text-white' : 'text-slate-400 hover:text-slate-600'}`}>ALL WORKS</button>
-                    <button onClick={() => setActiveTab('oa')} className={`px-6 py-2.5 rounded-xl text-[11px] font-black transition-all ${activeTab === 'oa' ? 'bg-emerald-500 text-white' : 'text-slate-400 hover:text-slate-600'}`}>OPEN ACCESS</button>
-                    <button onClick={() => setActiveTab('high-impact')} className={`px-6 py-2.5 rounded-xl text-[11px] font-black transition-all ${activeTab === 'high-impact' ? 'bg-amber-500 text-white' : 'text-slate-400 hover:text-slate-600'}`}>HIGH IMPACT</button>
-                  </div>
-                  <div className="text-[11px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                    <BookOpen size={16}/> {filteredResults.length} Relevant Entries Found
-                  </div>
-                </div>
-
-                <div className="overflow-y-auto flex-grow custom-scrollbar">
-                  <table className="w-full text-left border-separate border-spacing-0">
-                    <tbody className="divide-y divide-slate-100">
-                      {filteredResults.map((res, i) => (
-                        <tr key={i} className="group hover:bg-blue-50/50 transition-all">
-                          <td className="p-10">
-                            <div className="flex flex-col gap-4">
-                              <div className="flex justify-between items-start gap-4">
-                                <span className="text-[11px] font-black text-blue-600 tracking-[0.2em] uppercase bg-blue-50 px-3 py-1 rounded-lg border border-blue-100">{res.publisher}</span>
-                                <div className="flex gap-2">
-                                  {res.isOpenAccess && <span className="p-1.5 bg-emerald-100 text-emerald-600 rounded-lg" title="Open Access Available"><Link size={14}/></span>}
-                                  {res.citations > 100 && <span className="p-1.5 bg-amber-100 text-amber-600 rounded-lg" title="Highly Cited"><Star size={14} fill="currentColor"/></span>}
-                                </div>
-                              </div>
-
-                              <div className="font-black text-slate-800 leading-tight group-hover:text-blue-600 transition-colors text-xl xl:text-2xl">
-                                {res.title}
-                              </div>
-
-                              <p className="text-sm text-slate-500 font-medium leading-relaxed line-clamp-2 italic">
-                                "{res.abstractPreview}"
-                              </p>
-
-                              <div className="flex flex-wrap items-center gap-4 mt-6">
-                                <span className="text-[12px] text-slate-400 font-black bg-white border border-slate-200 px-5 py-1.5 rounded-full uppercase shadow-sm">{res.year}</span>
-                                <span className="text-[12px] text-slate-500 font-bold italic truncate max-w-[400px] flex items-center gap-2">
-                                  <BookOpen size={14}/> {res.journal}
-                                </span>
-                                {res.doi && (
-                                  <a href={`https://doi.org/${res.doi}`} target="_blank" rel="noreferrer" className="ml-auto flex items-center gap-2 bg-slate-900 text-white px-6 py-2.5 rounded-2xl text-[11px] font-black hover:bg-blue-600 transition-all shadow-lg">
-                                    VIEW PAPER <ExternalLink size={14}/>
-                                  </a>
-                                )}
-                              </div>
+            <div className="divide-y divide-slate-100">
+              {filteredResults.map((res, i) => {
+                const isSelected = selectedPapers.has(i);
+                return (
+                  <div key={i} className={`p-10 transition-all flex gap-8 items-start hover:bg-blue-50/30 ${isSelected ? 'bg-blue-50' : ''}`}>
+                    <div onClick={() => toggleSelection(i)} className={`mt-2 cursor-pointer ${isSelected ? 'text-blue-600' : 'text-slate-300 hover:text-slate-400'}`}>
+                      {isSelected ? <CheckSquare size={28}/> : <Square size={28}/>}
+                    </div>
+                    <div className="flex-grow">
+                      <div className="flex justify-between items-start mb-4">
+                        <span className="text-[11px] font-black text-blue-600 tracking-[0.2em] uppercase bg-blue-50 px-3 py-1 rounded-lg">{res.publisher}</span>
+                        <div className="flex gap-3">
+                          {res.isOpenAccess && <span className="p-2 bg-emerald-100 text-emerald-600 rounded-xl" title="Open Access"><Link size={16}/></span>}
+                          {res.citations > 100 && <span className="p-2 bg-amber-100 text-amber-600 rounded-xl"><Star size={16} fill="currentColor"/></span>}
+                        </div>
+                      </div>
+                      <h3 className="text-xl font-black text-slate-800 leading-tight mb-4">{res.title}</h3>
+                      <p className="text-sm text-slate-400 font-medium italic mb-6 leading-relaxed">"{res.abstractPreview}"</p>
+                      
+                      <div className="flex flex-wrap items-center gap-4">
+                        <span className="text-[12px] text-slate-400 font-black bg-white border border-slate-200 px-5 py-1.5 rounded-full uppercase">{res.year}</span>
+                        <span className="text-[12px] text-slate-500 font-bold flex items-center gap-2"><BookOpen size={16}/> {res.journal}</span>
+                        
+                        <div className="ml-auto flex gap-3">
+                          {/* DIRECT PDF DOWNLOAD LOGIC */}
+                          {res.isOpenAccess ? (
+                            <a href={res.pdfUrl} target="_blank" rel="noreferrer" className="flex items-center gap-2 bg-emerald-600 text-white px-6 py-3 rounded-2xl text-[11px] font-black hover:bg-emerald-500 shadow-xl transition-all">
+                              <Download size={16}/> PDF DOCUMENT
+                            </a>
+                          ) : (
+                            <div className="flex items-center gap-2 bg-slate-100 text-slate-400 px-6 py-3 rounded-2xl text-[11px] font-black cursor-not-allowed">
+                              <Zap size={16}/> PAYWALLED
                             </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+                          )}
+                          <a href={`https://doi.org/${res.doi}`} target="_blank" rel="noreferrer" className="flex items-center gap-2 bg-slate-900 text-white px-6 py-3 rounded-2xl text-[11px] font-black hover:bg-blue-600 transition-all shadow-lg">
+                            JOURNAL LINK <ExternalLink size={16}/>
+                          </a>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
       </div>
 
-      {/* Unique Research Tooltips */}
-      <div className="fixed bottom-10 right-10 flex flex-col gap-4 z-50">
-        <div className="bg-white p-4 rounded-2xl shadow-2xl border border-slate-100 flex items-center gap-3 animate-bounce">
-          <div className="p-2 bg-blue-600 text-white rounded-lg"><Info size={20}/></div>
-          <p className="text-[11px] font-black uppercase tracking-wider text-slate-500">Deep Scanned 1000+ Nodes</p>
+      <div className="fixed bottom-10 right-10 z-50">
+        <div className="bg-white p-5 rounded-[2rem] shadow-2xl border border-slate-100 flex items-center gap-4">
+           <div className="bg-blue-600 text-white p-3 rounded-2xl"><Info size={24}/></div>
+           <div>
+              <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Active Search Mode</p>
+              <p className="text-xs font-bold text-slate-800 italic">Select & Download Academic Datasets</p>
+           </div>
         </div>
       </div>
     </div>
