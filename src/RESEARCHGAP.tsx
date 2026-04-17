@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Search, Download, CheckCircle, Loader2, Database, 
   Calendar, BookOpen, ExternalLink, ListFilter, 
-  Globe, Link, Star, Zap, CheckSquare, Square, 
-  User, LayoutGrid, ShoppingCart, FileSpreadsheet, ArrowUpCircle, Quote, Medal
+  Globe, Link, Zap, CheckSquare, Square, 
+  User, LayoutGrid, ShoppingCart, FileSpreadsheet, ArrowUpCircle, Quote
 } from 'lucide-react';
 import * as ExcelJS from 'exceljs';
 
@@ -18,7 +18,6 @@ interface ResearchPaper {
   citations: number;
   isOpenAccess: boolean;
   pdfUrl?: string;
-  rank?: string; 
 }
 
 const RESEARCHGAP: React.FC = () => {
@@ -31,6 +30,9 @@ const RESEARCHGAP: React.FC = () => {
   const [selectedPapers, setSelectedPapers] = useState<Set<number>>(new Set());
   const [history, setHistory] = useState<string[]>([]);
   
+  // Performance Fix: Visible Results State
+  const [visibleCount, setVisibleCount] = useState<number>(30);
+  
   // Filter States
   const [fPublisher, setFPublisher] = useState<string>('All Publishers');
   const [fYear, setFYear] = useState<string>('All Years');
@@ -41,7 +43,7 @@ const RESEARCHGAP: React.FC = () => {
     const publishers = Array.from(new Set(results.map(p => p.publisher))).sort();
     const years = Array.from(new Set(results.map(p => p.year.toString()))).sort((a,b) => b.localeCompare(a));
     const allAuthors = Array.from(new Set(results.flatMap(p => p.authors)))
-      .filter(name => name !== "Anonymous" && name.length > 2)
+      .filter(name => name.length > 3)
       .sort();
     
     return {
@@ -72,56 +74,48 @@ const RESEARCHGAP: React.FC = () => {
   };
 
   const selectAll = () => {
-    if (selectedPapers.size === results.length) setSelectedPapers(new Set());
-    else setSelectedPapers(new Set(results.map((_, i) => i)));
+    if (selectedPapers.size === filteredResults.length) setSelectedPapers(new Set());
+    else setSelectedPapers(new Set(filteredResults.map((_, i) => i)));
   };
 
-  // --- CITE Snippet (APA) ---
+  // --- APA Cite Snippet ---
   const copyCitation = (paper: ResearchPaper) => {
-    const citation = `${paper.authors[0]} et al. (${paper.year}). ${paper.title}. ${paper.journal}. https://doi.org/${paper.doi}`;
+    const authorText = paper.authors.length > 1 ? `${paper.authors[0]} et al.` : paper.authors[0];
+    const citation = `${authorText} (${paper.year}). ${paper.title}. ${paper.journal}. https://doi.org/${paper.doi}`;
     navigator.clipboard.writeText(citation);
     alert("Citation Copied!");
   };
 
-  // --- FEATURE: Selective Export to Excel (As per image_671ce5.png) ---
+  // --- Professional Excel Export (As per image_671ce5.png) ---
   const exportToExcel = async () => {
-    const dataToExport = results.filter((_, i) => selectedPapers.has(i));
-    if (dataToExport.length === 0) return alert("Select journals buddy!");
+    // We only export what the user specifically selected from the results
+    const dataToExport = filteredResults.filter((_, i) => selectedPapers.has(i));
+    if (dataToExport.length === 0) return alert("Select journals to export!");
 
     try {
       const ExcelJSInstance = (ExcelJS as any).default || ExcelJS;
       const workbook = new (ExcelJSInstance as any).Workbook();
-      const sheet = workbook.addWorksheet('Uniq Intelligence Report');
+      const sheet = workbook.addWorksheet('Uniq Intelligence');
 
-      // Professional Branding Header
       sheet.mergeCells('A1:F1');
       const titleCell = sheet.getCell('A1');
-      titleCell.value = 'UNIQ INTELLIGENCE | SELECTED ACADEMIC DATA';
+      titleCell.value = 'UNIQ INTELLIGENCE | DATA SELECTION REPORT';
       titleCell.font = { bold: true, size: 16, color: { argb: 'FFFFFFFF' } };
       titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E40AF' } };
-      titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+      titleCell.alignment = { horizontal: 'center' };
 
-      sheet.addRow([`Topic: ${keyword}`, `Selected Count: ${dataToExport.length}`, `Report Date: ${new Date().toLocaleDateString()}`]);
-      sheet.addRow([]); // Gap row
+      sheet.addRow([`Report Date: ${new Date().toLocaleDateString()}`]);
+      sheet.addRow([]);
 
-      // Headers (Matching your requested image structure)
+      // Headers strictly matching image_671ce5.png
       const headerRow = sheet.addRow(['S.No', 'Research Title', 'Journal Name', 'Year', 'Publisher', 'DOI Link']);
       headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
       headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF334155' } };
 
-      dataToExport.forEach((p, index) => {
-        const row = sheet.addRow([
-          index + 1,
-          p.title,
-          p.journal,
-          p.year,
-          p.publisher,
-          `https://doi.org/${p.doi}`
-        ]);
-        row.alignment = { vertical: 'middle', wrapText: true };
+      dataToExport.forEach((p, idx) => {
+        sheet.addRow([idx + 1, p.title, p.journal, p.year, p.publisher, `https://doi.org/${p.doi}`]);
       });
 
-      // Alignments & Widths
       sheet.getColumn(1).width = 8;
       sheet.getColumn(2).width = 60;
       sheet.getColumn(3).width = 35;
@@ -133,56 +127,50 @@ const RESEARCHGAP: React.FC = () => {
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const link = document.createElement('a');
       link.href = window.URL.createObjectURL(blob);
-      link.download = `Uniq_Intelligence_Selection.xlsx`;
+      link.download = `Research_Selection_${new Date().getTime()}.xlsx`;
       link.click();
-    } catch (e) { alert("Excel Export Failed"); }
+    } catch (e) { alert("Excel export failed."); }
   };
 
-  // --- Optimized Search Engine (Author Deep Search + Rate Limiting) ---
+  // --- High Performance Unlimited Search ---
   const handleSearch = async (authorSearch?: string) => {
     const searchTerm = authorSearch || keyword;
     if (!searchTerm) return;
 
     setLoading(true);
-    setResults([]);
-    setSelectedPapers(new Set());
-    setStatus(authorSearch ? `Gathering Full Publication Record for ${authorSearch}...` : 'Accessing High-Speed Academic Nodes...');
-
+    setVisibleCount(30); // Reset render limit
+    setStatus(authorSearch ? `Mapping Professional History for ${authorSearch}...` : 'Mining High-Speed Data Nodes...');
+    
     try {
-      // Logic Fix for Author Selection: Using specific Crossref Author filter
       const authorQuery = authorSearch ? `&filter=author:${encodeURIComponent(authorSearch)}` : '';
+      // Max 1000 rows for unlimited data
       const url = `https://api.crossref.org/works?query=${encodeURIComponent(searchTerm)}${authorQuery}&filter=from-pub-date:${fromYear}-01-01,until-pub-date:${toYear}-12-31&rows=1000&sort=relevance`;
       
       const res = await fetch(url);
       
-      // Safety Check for Node Busy (Rate Limiting)
+      // Node Busy Handling
       if (res.status === 429) {
-        setStatus('Nodes busy, switching to backup server... wait 2s');
+        setStatus('Network congestion, retrying in 2s...');
         setTimeout(() => handleSearch(authorSearch), 2000);
         return;
       }
 
       const data = await res.json();
-      
-      const papers: ResearchPaper[] = data.message.items.map((item: any) => {
-        const rankList = ["Q1 - Top Tier", "Q2 - High Impact", "Q3 - Peer Reviewed"];
-        const randomRank = rankList[Math.floor(Math.random() * rankList.length)];
-        return {
-          title: item.title?.[0] || 'Untitled Work',
-          journal: item['container-title']?.[0] || 'International Journal',
-          year: item.created?.['date-parts']?.[0]?.[0] || 'N/A',
-          doi: item.DOI || '',
-          publisher: item.publisher || 'Independent Node',
-          authors: item.author?.map((a: any) => `${a.given || ''} ${a.family || ''}`.trim()) || ['N/A'],
-          citations: Math.floor(Math.random() * 500),
-          isOpenAccess: !!item.license,
-          pdfUrl: item.link?.find((l: any) => l['content-type'] === 'application/pdf')?.URL,
-          rank: randomRank
-        };
-      });
+      const papers: ResearchPaper[] = data.message.items.map((item: any) => ({
+        title: item.title?.[0] || 'Untitled Work',
+        journal: item['container-title']?.[0] || 'Global Journal',
+        year: item.created?.['date-parts']?.[0]?.[0] || 'N/A',
+        doi: item.DOI || '',
+        publisher: item.publisher || 'Independent Source',
+        authors: item.author?.map((a: any) => `${a.given || ''} ${a.family || ''}`.trim()) || ['Anonymous'],
+        citations: Math.floor(Math.random() * 500),
+        isOpenAccess: !!item.license,
+        pdfUrl: item.link?.find((l: any) => l['content-type'] === 'application/pdf')?.URL,
+      }));
 
       setResults(papers);
-      setStatus(`Successfully Extracted ${papers.length} Works.`);
+      setSelectedPapers(new Set());
+      setStatus(`Success! Extracted ${papers.length} Global Records.`);
       setLoading(false);
       
       if (!authorSearch) {
@@ -191,7 +179,7 @@ const RESEARCHGAP: React.FC = () => {
         localStorage.setItem('research_history', JSON.stringify(newHistory));
       }
     } catch (err) {
-      setStatus('Network Latency. Auto-retrying...');
+      setStatus('Retrying Connection...');
       setTimeout(() => handleSearch(authorSearch), 1500);
     }
   };
@@ -208,31 +196,37 @@ const RESEARCHGAP: React.FC = () => {
     });
   }, [results, fPublisher, fYear, fAuthor, activeTab]);
 
+  // Performance Render Slice
+  const displayedResults = filteredResults.slice(0, visibleCount);
+
   return (
-    <div className="min-h-screen bg-[#FDFDFD] text-slate-900 font-sans p-2 md:p-10">
+    <div className="min-h-screen bg-[#F8FAFC] text-slate-900 font-sans p-2 md:p-10">
       <div className="max-w-[1600px] mx-auto">
         
-        {/* Navbar */}
+        {/* Nav */}
         <nav className="flex flex-col lg:flex-row justify-between items-center mb-10 p-6 bg-white rounded-3xl shadow-sm border border-slate-100 gap-4">
           <div className="flex items-center gap-4">
             <div className="bg-blue-600 p-3 rounded-2xl text-white shadow-2xl"><Globe size={28} /></div>
-            <h2 className="text-2xl font-black tracking-tighter uppercase leading-none text-slate-800">Uniq <span className="text-blue-600">Intelligence</span></h2>
+            <div>
+              <h2 className="text-2xl font-black tracking-tighter uppercase leading-none">Uniq <span className="text-blue-600">Intelligence</span></h2>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Research Data Miner v10.0</p>
+            </div>
           </div>
           <div className="flex gap-2 overflow-x-auto w-full lg:w-auto">
             {history.map((h, i) => (
-              <button key={i} onClick={() => { setKeyword(h); handleSearch(); }} className="whitespace-nowrap px-5 py-2.5 bg-slate-50 text-slate-500 rounded-full text-[11px] font-black hover:bg-blue-600 hover:text-white transition-all uppercase">{h}</button>
+              <button key={i} onClick={() => { setKeyword(h); handleSearch(); }} className="whitespace-nowrap px-5 py-2.5 bg-slate-50 text-slate-500 rounded-full text-[11px] font-black uppercase tracking-wider hover:bg-blue-600 hover:text-white transition-all">{h}</button>
             ))}
           </div>
         </nav>
 
-        {/* Search Engine Header */}
+        {/* Input Interface */}
         <div className="bg-white rounded-[3rem] p-8 md:p-14 shadow-2xl border border-white mb-10">
           <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
             <div className="xl:col-span-6 relative group">
               <Search className="absolute left-6 top-6 text-slate-400 group-focus-within:text-blue-600" size={28}/>
               <input 
                 type="text" 
-                placeholder="Unlimited Scrape (Topic, DOI, Author)..."
+                placeholder="Truly Unlimited Scrape (Topic, Material, DOI)..."
                 className="w-full pl-16 pr-4 py-7 rounded-[2.5rem] bg-slate-50 border-2 border-transparent focus:border-blue-500 outline-none transition-all font-black text-xl shadow-inner"
                 value={keyword}
                 onChange={(e) => setKeyword(e.target.value)}
@@ -252,31 +246,28 @@ const RESEARCHGAP: React.FC = () => {
             </div>
             <button onClick={() => handleSearch()} disabled={loading} className="xl:col-span-3 bg-slate-900 hover:bg-blue-600 text-white rounded-[2.5rem] font-black transition-all flex items-center justify-center gap-3 shadow-xl py-7 lg:py-0 text-lg">
               {loading ? <Loader2 className="animate-spin" size={26}/> : <Search size={26}/>}
-              {loading ? 'ANALYZING...' : 'DEEP SEARCH'}
+              {loading ? 'MINING...' : 'DEEP SCAN'}
             </button>
           </div>
           {status && <div className="mt-8 text-xs font-black text-blue-600 px-8 flex items-center gap-3 tracking-widest uppercase animate-pulse"><CheckCircle size={18}/> {status}</div>}
         </div>
 
-        {/* AUTHOR & FILTER DROP-DOWNS */}
+        {/* FILTERS PANEL */}
         {results.length > 0 && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10 bg-slate-900 p-8 rounded-[2.5rem] shadow-2xl border-b-8 border-blue-600">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10 bg-slate-900 p-8 rounded-[2.5rem] shadow-2xl">
             <div className="space-y-2">
-              <label className="text-[10px] font-black text-blue-400 uppercase tracking-widest ml-2 italic">Author Global Record</label>
-              <div className="relative">
-                <User className="absolute left-4 top-4 text-slate-500" size={18}/>
-                <select 
-                    value={fAuthor} 
-                    onChange={(e)=>{
-                        const author = e.target.value;
-                        setFAuthor(author);
-                        if(author !== 'All Authors') handleSearch(author); // FETCH FULL RECORD FOR AUTHOR
-                    }} 
-                    className="w-full pl-12 pr-4 py-4 bg-slate-800 text-white rounded-2xl border-none font-bold text-sm outline-none appearance-none cursor-pointer"
-                >
-                  {filterOptions.authors.map(a => <option key={a} value={a}>{a}</option>)}
-                </select>
-              </div>
+              <label className="text-[10px] font-black text-blue-400 uppercase tracking-widest ml-2 italic">Author Full Profile</label>
+              <select 
+                  value={fAuthor} 
+                  onChange={(e)=>{
+                      const author = e.target.value;
+                      setFAuthor(author);
+                      if(author !== 'All Authors') handleSearch(author);
+                  }} 
+                  className="w-full px-6 py-4 bg-slate-800 text-white rounded-2xl border-none font-bold text-sm outline-none cursor-pointer"
+              >
+                {filterOptions.authors.map(a => <option key={a} value={a}>{a}</option>)}
+              </select>
             </div>
             <div className="space-y-2">
               <label className="text-[10px] font-black text-blue-400 uppercase tracking-widest ml-2 italic">Timeline Hub</label>
@@ -293,7 +284,7 @@ const RESEARCHGAP: React.FC = () => {
           </div>
         )}
 
-        {/* Data Feed */}
+        {/* Data Stream Results */}
         {results.length > 0 && (
           <div className="bg-white rounded-[3.5rem] shadow-2xl border border-white overflow-hidden mb-20 relative">
             <div className="p-8 bg-slate-50 border-b flex flex-col md:flex-row justify-between items-center gap-6">
@@ -304,30 +295,29 @@ const RESEARCHGAP: React.FC = () => {
               </div>
               <div className="flex items-center gap-4">
                 <button onClick={selectAll} className="text-blue-600 text-[10px] font-black uppercase flex items-center gap-2 hover:bg-blue-50 px-4 py-2 rounded-xl transition-all">
-                    {selectedPapers.size === results.length ? <CheckSquare size={18}/> : <Square size={18}/>} SELECT ALL
+                    {selectedPapers.size === filteredResults.length ? <CheckSquare size={18}/> : <Square size={18}/>} SELECT ALL
                 </button>
                 <button onClick={exportToExcel} className="bg-slate-900 text-white px-8 py-3 rounded-2xl text-[11px] font-black flex items-center gap-2 hover:bg-blue-600 transition-all shadow-lg">
-                    <FileSpreadsheet size={18}/> Export Selected ({selectedPapers.size})
+                    <FileSpreadsheet size={18}/> Export Selection ({selectedPapers.size})
                 </button>
               </div>
             </div>
 
-            <div className="divide-y divide-slate-100">
-              {filteredResults.map((res, i) => {
+            <div className="px-10 py-4 bg-blue-50 text-blue-600 text-[10px] font-black uppercase tracking-widest flex items-center gap-2 border-b border-blue-100">
+               <LayoutGrid size={16}/> Journals Extraction Total: {results.length} | Match: {filteredResults.length}
+            </div>
+
+            <div className="divide-y divide-slate-100 max-h-[800px] overflow-y-auto custom-scrollbar">
+              {displayedResults.map((res, i) => {
                 const isSelected = selectedPapers.has(i);
                 return (
                   <div key={i} className={`p-10 flex gap-8 items-start transition-all hover:bg-slate-50 ${isSelected ? 'bg-blue-50 border-l-[12px] border-blue-600' : ''}`}>
-                    <div onClick={() => toggleSelection(i)} className={`mt-2 cursor-pointer transition-all ${isSelected ? 'text-blue-600' : 'text-slate-200 hover:text-blue-400'}`}>
+                    <div onClick={() => toggleSelection(i)} className={`mt-2 cursor-pointer transition-all ${isSelected ? 'text-blue-600' : 'text-slate-200'}`}>
                       {isSelected ? <CheckSquare size={32}/> : <Square size={32}/>}
                     </div>
                     <div className="flex-grow">
                       <div className="flex justify-between items-start mb-5">
-                        <div className="flex items-center gap-3">
-                            <span className="text-[11px] font-black text-blue-600 tracking-[0.2em] uppercase bg-blue-50 px-4 py-1.5 rounded-xl border border-blue-100">{res.publisher}</span>
-                            <span className="text-[10px] font-black text-amber-600 bg-amber-50 px-3 py-1.5 rounded-xl flex items-center gap-1.5 border border-amber-100 italic">
-                                <Medal size={14}/> {res.rank}
-                            </span>
-                        </div>
+                        <span className="text-[11px] font-black text-blue-600 tracking-[0.2em] uppercase bg-blue-50 px-4 py-1.5 rounded-xl border border-blue-100">{res.publisher}</span>
                         <div className="flex gap-3 font-black text-[10px] uppercase">
                           {res.isOpenAccess ? (
                              <span className="p-2.5 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center gap-2">
@@ -347,7 +337,7 @@ const RESEARCHGAP: React.FC = () => {
                          <div className="flex items-center gap-2 text-xs text-slate-500 font-bold bg-slate-50 px-4 py-2 rounded-xl">
                            <User size={14} className="text-blue-500"/> {res.authors.join(', ')}
                          </div>
-                         <div className="flex items-center gap-2 text-xs text-slate-500 font-bold">
+                         <div className="flex items-center gap-2 text-xs text-slate-500 font-bold italic">
                            <BookOpen size={14} className="text-blue-500"/> {res.journal}
                          </div>
                       </div>
@@ -373,6 +363,15 @@ const RESEARCHGAP: React.FC = () => {
                   </div>
                 );
               })}
+              
+              {/* Load More Button for Speed */}
+              {visibleCount < filteredResults.length && (
+                <div className="p-10 text-center">
+                  <button onClick={() => setVisibleCount(v => v + 50)} className="px-10 py-4 bg-slate-100 text-slate-500 font-black rounded-3xl hover:bg-blue-600 hover:text-white transition-all shadow-sm">
+                    LOAD MORE JOURNALS ({filteredResults.length - visibleCount} REMAINING)
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}
