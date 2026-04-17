@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   Search, Download, CheckCircle, Loader2, Database, 
   Calendar, BookOpen, ExternalLink, ListFilter, 
@@ -21,6 +21,7 @@ interface ResearchPaper {
 }
 
 const RESEARCHGAP: React.FC = () => {
+  // --- States (FRESH START: No LocalStorage) ---
   const [keyword, setKeyword] = useState<string>('');
   const [fromYear, setFromYear] = useState<number>(2015);
   const [toYear, setToYear] = useState<number>(2026);
@@ -28,7 +29,6 @@ const RESEARCHGAP: React.FC = () => {
   const [status, setStatus] = useState<string>('');
   const [results, setResults] = useState<ResearchPaper[]>([]);
   const [selectedPapers, setSelectedPapers] = useState<Set<number>>(new Set());
-  const [history, setHistory] = useState<string[]>([]);
   
   // Performance Fix: Visible Results State
   const [visibleCount, setVisibleCount] = useState<number>(30);
@@ -39,6 +39,7 @@ const RESEARCHGAP: React.FC = () => {
   const [fAuthor, setFAuthor] = useState<string>('All Authors');
   const [activeTab, setActiveTab] = useState<'all' | 'oa' | 'high-impact'>('all');
 
+  // Dynamic Filters Logic
   const filterOptions = useMemo(() => {
     const publishers = Array.from(new Set(results.map(p => p.publisher))).sort();
     const years = Array.from(new Set(results.map(p => p.year.toString()))).sort((a,b) => b.localeCompare(a));
@@ -57,13 +58,6 @@ const RESEARCHGAP: React.FC = () => {
     const yr = [];
     for (let i = 2026; i >= 1980; i--) yr.push(i);
     return yr;
-  }, []);
-
-  useEffect(() => {
-    const savedHistory = localStorage.getItem('research_history');
-    if (savedHistory) setHistory(JSON.parse(savedHistory));
-    const lastTopic = localStorage.getItem('last_topic');
-    if (lastTopic) setKeyword(lastTopic);
   }, []);
 
   const toggleSelection = (index: number) => {
@@ -86,9 +80,8 @@ const RESEARCHGAP: React.FC = () => {
     alert("Citation Copied!");
   };
 
-  // --- Professional Excel Export (As per image_671ce5.png) ---
+  // --- Excel Export (Match image_671ce5.png) ---
   const exportToExcel = async () => {
-    // We only export what the user specifically selected from the results
     const dataToExport = filteredResults.filter((_, i) => selectedPapers.has(i));
     if (dataToExport.length === 0) return alert("Select journals to export!");
 
@@ -107,7 +100,6 @@ const RESEARCHGAP: React.FC = () => {
       sheet.addRow([`Report Date: ${new Date().toLocaleDateString()}`]);
       sheet.addRow([]);
 
-      // Headers strictly matching image_671ce5.png
       const headerRow = sheet.addRow(['S.No', 'Research Title', 'Journal Name', 'Year', 'Publisher', 'DOI Link']);
       headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
       headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF334155' } };
@@ -132,30 +124,32 @@ const RESEARCHGAP: React.FC = () => {
     } catch (e) { alert("Excel export failed."); }
   };
 
-  // --- High Performance Unlimited Search ---
+  // --- Optimized Connection (Fix for Retrying Error) ---
   const handleSearch = async (authorSearch?: string) => {
     const searchTerm = authorSearch || keyword;
     if (!searchTerm) return;
 
     setLoading(true);
-    setVisibleCount(30); // Reset render limit
-    setStatus(authorSearch ? `Mapping Professional History for ${authorSearch}...` : 'Mining High-Speed Data Nodes...');
+    setResults([]); // Clear immediately for 50+ students usage
+    setVisibleCount(30); 
+    setStatus(authorSearch ? `Syncing Author Profile: ${authorSearch}...` : 'Accessing Global Academic Databases...');
     
     try {
       const authorQuery = authorSearch ? `&filter=author:${encodeURIComponent(authorSearch)}` : '';
-      // Max 1000 rows for unlimited data
       const url = `https://api.crossref.org/works?query=${encodeURIComponent(searchTerm)}${authorQuery}&filter=from-pub-date:${fromYear}-01-01,until-pub-date:${toYear}-12-31&rows=1000&sort=relevance`;
       
-      const res = await fetch(url);
+      const response = await fetch(url);
       
-      // Node Busy Handling
-      if (res.status === 429) {
-        setStatus('Network congestion, retrying in 2s...');
-        setTimeout(() => handleSearch(authorSearch), 2000);
-        return;
+      if (!response.ok) {
+        if (response.status === 429) {
+          setStatus('Server Busy (Too many requests). Waiting 3s...');
+          setTimeout(() => handleSearch(authorSearch), 3000);
+          return;
+        }
+        throw new Error('Network Error');
       }
 
-      const data = await res.json();
+      const data = await response.json();
       const papers: ResearchPaper[] = data.message.items.map((item: any) => ({
         title: item.title?.[0] || 'Untitled Work',
         journal: item['container-title']?.[0] || 'Global Journal',
@@ -170,17 +164,11 @@ const RESEARCHGAP: React.FC = () => {
 
       setResults(papers);
       setSelectedPapers(new Set());
-      setStatus(`Success! Extracted ${papers.length} Global Records.`);
+      setStatus(`Found ${papers.length} Results for ${searchTerm}.`);
       setLoading(false);
-      
-      if (!authorSearch) {
-        const newHistory = [keyword, ...history.filter(h => h !== keyword)].slice(0, 5);
-        setHistory(newHistory);
-        localStorage.setItem('research_history', JSON.stringify(newHistory));
-      }
     } catch (err) {
-      setStatus('Retrying Connection...');
-      setTimeout(() => handleSearch(authorSearch), 1500);
+      setStatus('Re-establishing connection...');
+      setTimeout(() => handleSearch(authorSearch), 2000);
     }
   };
 
@@ -196,37 +184,34 @@ const RESEARCHGAP: React.FC = () => {
     });
   }, [results, fPublisher, fYear, fAuthor, activeTab]);
 
-  // Performance Render Slice
   const displayedResults = filteredResults.slice(0, visibleCount);
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] text-slate-900 font-sans p-2 md:p-10">
+    <div className="min-h-screen bg-[#FDFDFD] text-slate-900 font-sans p-2 md:p-10">
       <div className="max-w-[1600px] mx-auto">
         
         {/* Nav */}
         <nav className="flex flex-col lg:flex-row justify-between items-center mb-10 p-6 bg-white rounded-3xl shadow-sm border border-slate-100 gap-4">
           <div className="flex items-center gap-4">
-            <div className="bg-blue-600 p-3 rounded-2xl text-white shadow-2xl"><Globe size={28} /></div>
+            <div className="bg-blue-600 p-3 rounded-2xl text-white shadow-2xl shadow-blue-200"><Globe size={28} /></div>
             <div>
               <h2 className="text-2xl font-black tracking-tighter uppercase leading-none">Uniq <span className="text-blue-600">Intelligence</span></h2>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Research Data Miner v10.0</p>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Institutional Multi-User Suite</p>
             </div>
           </div>
-          <div className="flex gap-2 overflow-x-auto w-full lg:w-auto">
-            {history.map((h, i) => (
-              <button key={i} onClick={() => { setKeyword(h); handleSearch(); }} className="whitespace-nowrap px-5 py-2.5 bg-slate-50 text-slate-500 rounded-full text-[11px] font-black uppercase tracking-wider hover:bg-blue-600 hover:text-white transition-all">{h}</button>
-            ))}
+          <div className="text-[10px] font-black text-slate-300 uppercase tracking-[0.3em]">
+             Fresh Session Enabled
           </div>
         </nav>
 
         {/* Input Interface */}
         <div className="bg-white rounded-[3rem] p-8 md:p-14 shadow-2xl border border-white mb-10">
           <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
-            <div className="xl:col-span-6 relative group">
-              <Search className="absolute left-6 top-6 text-slate-400 group-focus-within:text-blue-600" size={28}/>
+            <div className="xl:col-span-6 relative">
+              <Search className="absolute left-6 top-6 text-slate-400" size={28}/>
               <input 
                 type="text" 
-                placeholder="Truly Unlimited Scrape (Topic, Material, DOI)..."
+                placeholder="Enter topic to start fresh scan..."
                 className="w-full pl-16 pr-4 py-7 rounded-[2.5rem] bg-slate-50 border-2 border-transparent focus:border-blue-500 outline-none transition-all font-black text-xl shadow-inner"
                 value={keyword}
                 onChange={(e) => setKeyword(e.target.value)}
@@ -256,7 +241,7 @@ const RESEARCHGAP: React.FC = () => {
         {results.length > 0 && (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10 bg-slate-900 p-8 rounded-[2.5rem] shadow-2xl">
             <div className="space-y-2">
-              <label className="text-[10px] font-black text-blue-400 uppercase tracking-widest ml-2 italic">Author Full Profile</label>
+              <label className="text-[10px] font-black text-blue-400 uppercase tracking-widest ml-2 italic">Author Filter</label>
               <select 
                   value={fAuthor} 
                   onChange={(e)=>{
@@ -270,7 +255,7 @@ const RESEARCHGAP: React.FC = () => {
               </select>
             </div>
             <div className="space-y-2">
-              <label className="text-[10px] font-black text-blue-400 uppercase tracking-widest ml-2 italic">Timeline Hub</label>
+              <label className="text-[10px] font-black text-blue-400 uppercase tracking-widest ml-2 italic">Year Hub</label>
               <select value={fYear} onChange={(e)=>setFYear(e.target.value)} className="w-full px-6 py-4 bg-slate-800 text-white rounded-2xl border-none font-bold text-sm outline-none cursor-pointer">
                   {filterOptions.years.map(y => <option key={y} value={y}>{y}</option>)}
               </select>
@@ -284,7 +269,7 @@ const RESEARCHGAP: React.FC = () => {
           </div>
         )}
 
-        {/* Data Stream Results */}
+        {/* Data Feed */}
         {results.length > 0 && (
           <div className="bg-white rounded-[3.5rem] shadow-2xl border border-white overflow-hidden mb-20 relative">
             <div className="p-8 bg-slate-50 border-b flex flex-col md:flex-row justify-between items-center gap-6">
@@ -298,21 +283,21 @@ const RESEARCHGAP: React.FC = () => {
                     {selectedPapers.size === filteredResults.length ? <CheckSquare size={18}/> : <Square size={18}/>} SELECT ALL
                 </button>
                 <button onClick={exportToExcel} className="bg-slate-900 text-white px-8 py-3 rounded-2xl text-[11px] font-black flex items-center gap-2 hover:bg-blue-600 transition-all shadow-lg">
-                    <FileSpreadsheet size={18}/> Export Selection ({selectedPapers.size})
+                    <FileSpreadsheet size={18}/> Export ({selectedPapers.size})
                 </button>
               </div>
             </div>
 
             <div className="px-10 py-4 bg-blue-50 text-blue-600 text-[10px] font-black uppercase tracking-widest flex items-center gap-2 border-b border-blue-100">
-               <LayoutGrid size={16}/> Journals Extraction Total: {results.length} | Match: {filteredResults.length}
+               <LayoutGrid size={16}/> Session Records: {results.length} | Filtered: {filteredResults.length}
             </div>
 
-            <div className="divide-y divide-slate-100 max-h-[800px] overflow-y-auto custom-scrollbar">
+            <div className="divide-y divide-slate-100 max-h-[800px] overflow-y-auto scrollbar-hide">
               {displayedResults.map((res, i) => {
                 const isSelected = selectedPapers.has(i);
                 return (
                   <div key={i} className={`p-10 flex gap-8 items-start transition-all hover:bg-slate-50 ${isSelected ? 'bg-blue-50 border-l-[12px] border-blue-600' : ''}`}>
-                    <div onClick={() => toggleSelection(i)} className={`mt-2 cursor-pointer transition-all ${isSelected ? 'text-blue-600' : 'text-slate-200'}`}>
+                    <div onClick={() => toggleSelection(i)} className={`mt-2 cursor-pointer transition-all ${isSelected ? 'text-blue-600' : 'text-slate-200 hover:text-blue-400'}`}>
                       {isSelected ? <CheckSquare size={32}/> : <Square size={32}/>}
                     </div>
                     <div className="flex-grow">
@@ -320,12 +305,12 @@ const RESEARCHGAP: React.FC = () => {
                         <span className="text-[11px] font-black text-blue-600 tracking-[0.2em] uppercase bg-blue-50 px-4 py-1.5 rounded-xl border border-blue-100">{res.publisher}</span>
                         <div className="flex gap-3 font-black text-[10px] uppercase">
                           {res.isOpenAccess ? (
-                             <span className="p-2.5 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center gap-2">
-                               <CheckCircle size={16}/> Free Download
+                             <span className="p-2.5 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center gap-2 font-black">
+                               <CheckCircle size={16}/> Free
                              </span>
                           ) : (
-                             <span className="p-2.5 bg-slate-100 text-slate-500 rounded-2xl flex items-center gap-2 border border-slate-200 italic shadow-sm">
-                               <ShoppingCart size={16}/> Purchase Access
+                             <span className="p-2.5 bg-slate-100 text-slate-500 rounded-2xl flex items-center gap-2 italic">
+                               <ShoppingCart size={16}/> Purchase
                              </span>
                           )}
                         </div>
@@ -337,7 +322,7 @@ const RESEARCHGAP: React.FC = () => {
                          <div className="flex items-center gap-2 text-xs text-slate-500 font-bold bg-slate-50 px-4 py-2 rounded-xl">
                            <User size={14} className="text-blue-500"/> {res.authors.join(', ')}
                          </div>
-                         <div className="flex items-center gap-2 text-xs text-slate-500 font-bold italic">
+                         <div className="flex items-center gap-2 text-xs text-slate-500 font-bold">
                            <BookOpen size={14} className="text-blue-500"/> {res.journal}
                          </div>
                       </div>
@@ -348,15 +333,9 @@ const RESEARCHGAP: React.FC = () => {
                           <button onClick={() => copyCitation(res)} className="flex items-center gap-2 bg-slate-100 text-slate-600 px-6 py-4 rounded-[1.5rem] text-[11px] font-black hover:bg-slate-200 transition-all uppercase">
                              <Quote size={18}/> Cite
                           </button>
-                          {res.isOpenAccess ? (
-                             <a href={res.pdfUrl || `https://doi.org/${res.doi}`} target="_blank" rel="noreferrer" className="flex items-center gap-2 bg-emerald-600 text-white px-10 py-4 rounded-[1.5rem] text-[11px] font-black hover:bg-emerald-500 shadow-xl transition-all uppercase">
-                               <Download size={18}/> PDF Direct
-                             </a>
-                          ) : (
-                             <a href={`https://doi.org/${res.doi}`} target="_blank" rel="noreferrer" className="flex items-center gap-2 bg-slate-900 text-white px-10 py-4 rounded-[1.5rem] text-[11px] font-black hover:bg-blue-600 transition-all shadow-lg uppercase">
-                               Purchase <ExternalLink size={18}/>
-                             </a>
-                          )}
+                          <a href={`https://doi.org/${res.doi}`} target="_blank" rel="noreferrer" className="flex items-center gap-2 bg-slate-900 text-white px-10 py-4 rounded-[1.5rem] text-[11px] font-black hover:bg-blue-600 transition-all shadow-lg uppercase">
+                               Portal <ExternalLink size={18}/>
+                          </a>
                         </div>
                       </div>
                     </div>
@@ -364,11 +343,10 @@ const RESEARCHGAP: React.FC = () => {
                 );
               })}
               
-              {/* Load More Button for Speed */}
               {visibleCount < filteredResults.length && (
                 <div className="p-10 text-center">
-                  <button onClick={() => setVisibleCount(v => v + 50)} className="px-10 py-4 bg-slate-100 text-slate-500 font-black rounded-3xl hover:bg-blue-600 hover:text-white transition-all shadow-sm">
-                    LOAD MORE JOURNALS ({filteredResults.length - visibleCount} REMAINING)
+                  <button onClick={() => setVisibleCount(v => v + 50)} className="px-12 py-5 bg-blue-600 text-white font-black rounded-[2rem] hover:bg-blue-700 transition-all shadow-2xl">
+                    LOAD MORE DATA (+{filteredResults.length - visibleCount})
                   </button>
                 </div>
               )}
