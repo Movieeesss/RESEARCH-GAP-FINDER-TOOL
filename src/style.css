@@ -1,0 +1,10 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Add this for smooth printing */
+@media print {
+  .print\:hidden {
+    display: none !important;
+  }
+}
